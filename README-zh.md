@@ -1,12 +1,10 @@
-<h1 align="center">ArXiv-Recommender</h1>
+# ArXiv-Recommender
 
-<p align="center">
-  <a href="./README.md">English</a> | <a href="./README-zh.md">中文</a>
-</p>
+[English](./README.md) | [中文](./README-zh.md)
 
 ---
 
-<p align="center">根据你的个性化描述，每天自动推荐你感兴趣的 arXiv 最新论文。</p>
+根据你的个性化描述，每天自动推荐你感兴趣的 arXiv 最新论文。
 
 > [!NOTE]
 > 本项目借鉴了 [zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily) 的思路和部分功能，感谢他们的出色工作！
@@ -20,7 +18,7 @@
 - 将推荐历史保存为 Markdown 和 HTML 文件。
 - 支持多线程并行加速推理过程。
 - **结果缓存**：LLM 评分、全文解读、渲染后的邮件均按日期缓存，重复运行不会重复消耗 API 调用。
-- 支持多收件人（逗号分隔）。
+- 支持多收件人（空格分隔）。
 
 ## 快速开始
 
@@ -42,11 +40,13 @@ uv sync
 
 你需要一个支持 SMTP 的邮箱来发送推荐邮件。常见选择：
 
-| 邮箱 | SMTP 服务器 | 端口 |
-|------|-------------|------|
-| QQ 邮箱 | `smtp.qq.com` | 465 |
-| Gmail | `smtp.gmail.com` | 587 |
-| 163 邮箱 | `smtp.163.com` | 465 |
+
+| 邮箱     | SMTP 服务器         | 端口  |
+| ------ | ---------------- | --- |
+| QQ 邮箱  | `smtp.qq.com`    | 465 |
+| Gmail  | `smtp.gmail.com` | 587 |
+| 163 邮箱 | `smtp.163.com`   | 465 |
+
 
 > **注意**：`--sender_password` 填的**不是邮箱登录密码**，而是邮箱生成的 **SMTP 授权码**。以 QQ 邮箱为例：进入「设置 → 账户」，开启「POP3/SMTP 服务」，按提示验证后即可获得一个 16 位授权码。
 
@@ -71,47 +71,14 @@ I'm not interested in the following fields:
 
 项目使用统一接口：`--base_url`、`--model` 和 `--api_key`，兼容任何 OpenAI 格式的 API。
 
-**OpenAI：**
-
-```bash
-python main.py --categories cs.CV cs.AI \
-    --model gpt-4o \
-    --base_url https://api.openai.com/v1 --api_key 你的API密钥 \
-    --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender 你的邮箱@qq.com --receiver 接收邮箱@gmail.com \
-    --sender_password 你的SMTP授权码 \
-    --num_workers 16 --temperature 0.7 --save
-```
-
-**SiliconFlow（DeepSeek 等国产模型）：**
-
 ```bash
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key 你的API密钥 \
     --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender 你的邮箱@qq.com --receiver 接收邮箱@gmail.com \
+    --sender 你的邮箱@qq.com --receivers 接收邮箱@gmail.com \
     --sender_password 你的SMTP授权码 \
     --num_workers 16 --temperature 0.7 --save
-```
-
-**本地 Ollama（通过其 OpenAI 兼容端点）：**
-
-```bash
-python main.py --categories cs.CV cs.AI \
-    --model deepseek-r1:7b \
-    --base_url http://localhost:11434/v1 --api_key ollama \
-    --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender 你的邮箱@qq.com --receiver 接收邮箱@gmail.com \
-    --sender_password 你的SMTP授权码 \
-    --num_workers 4 --temperature 0.7 --save
-```
-
-也可以直接使用项目提供的 shell 脚本：
-
-```bash
-bash main_gpt.sh
-bash main_silicon_flow.sh
 ```
 
 ### 5.（可选）每天自动运行
@@ -128,37 +95,52 @@ crontab -e
 0 5 * * * /path/to/customize-arxiv-daily/main_gpt.sh
 ```
 
-### 6.（可选）自定义 LLM Prompt
+### 6.（可选）调整搜索与推荐参数
 
-编辑 `arxiv_daily.py` 中的 `get_response()` 方法，调整 LLM 对每篇论文的评估方式；或编辑 `get_full_analysis()` 方法，修改全文深度解读的维度。
+编辑 `config.yaml` 来控制核心推荐行为：
+
+
+| 参数                        | 说明                   |
+| --------------------------- | -------------------- |
+| `max_entries`               | 每个分类从 arXiv 最多抓取的论文数 |
+| `max_paper_num`             | 最终推荐的论文数量上限          |
+| `relevance_score_threshold` | 进入全文精读的最低相关度分数（0–10） |
+| `fulltext_max_chars`        | 爬取全文时的最大字符数          |
+
+
+### 7.（可选）自定义 LLM Prompt
+
+编辑 `prompt/` 目录下的提示词模板，调整 LLM 对每篇论文的评估方式或全文深度解读的维度。
 
 ## 参数说明
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--categories` | arXiv 分类，如 `cs.CV cs.AI` | 必填 |
-| `--model` | 模型名称，如 `gpt-4o` | 必填 |
-| `--base_url` | API 地址，如 `https://api.openai.com/v1` | 必填 |
-| `--api_key` | API 密钥 | 必填 |
-| `--smtp_server` | SMTP 服务器地址 | 必填 |
-| `--smtp_port` | SMTP 服务器端口 | 必填 |
-| `--sender` | 发件人邮箱 | 必填 |
-| `--receiver` | 收件人邮箱，多个用逗号分隔 | 必填 |
-| `--sender_password` | SMTP 授权码 | 必填 |
-| `--max_paper_num` | 推荐论文数量上限 | 20 |
-| `--max_entries` | 每个分类最多爬取论文数 | 100 |
-| `--num_workers` | 并行线程数 | 4 |
-| `--temperature` | LLM 采样温度 | 0.7 |
-| `--title` | 邮件标题前缀 | `Daily arXiv` |
-| `--save` | 是否保存结果到本地 | 关闭 |
-| `--save_dir` | 保存目录 | `./arxiv_history` |
-| `--description` | 研究兴趣描述文件路径 | `description.txt` |
+
+| 参数                  | 说明                                   | 默认值               |
+| ------------------- | ------------------------------------ | ----------------- |
+| `--categories`      | arXiv 分类，如 `cs.CV cs.AI`             | 必填                |
+| `--model`           | 模型名称，如 `gpt-4o`                      | 必填                |
+| `--base_url`        | API 地址，如 `https://api.openai.com/v1` | 必填                |
+| `--api_key`         | API 密钥                               | 必填                |
+| `--smtp_server`     | SMTP 服务器地址                           | 必填                |
+| `--smtp_port`       | SMTP 服务器端口                           | 必填                |
+| `--sender`          | 发件人邮箱                                | 必填                |
+| `--receivers`       | 收件人邮箱，多个用空格分隔                        | 必填                |
+| `--sender_password` | SMTP 授权码                             | 必填                |
+| `--max_paper_num`   | 推荐论文数量上限                             | 20                |
+| `--max_entries`     | 每个分类最多爬取论文数                          | 100               |
+| `--num_workers`     | 并行线程数                                | 4                 |
+| `--temperature`     | LLM 采样温度                             | 0.7               |
+| `--title`           | 邮件标题前缀                               | `Daily arXiv`     |
+| `--save`            | 是否保存结果到本地                            | 关闭                |
+| `--save_dir`        | 保存目录                                 | `./arxiv_history` |
+| `--description`     | 研究兴趣描述文件路径                           | `description.txt` |
+
 
 ## 工作原理
 
 1. `util/request.py` 爬取指定分类的 arXiv "new" 页面，提取论文元数据（标题、摘要、PDF 链接等）。
 2. `arxiv_daily.py` 通过 OpenAI 兼容 API 并行调用 LLM，对每篇论文进行总结并评估与研究兴趣的相关性（0–10 分）。结果按日期缓存到本地。
-3. 按相关性排序后取前 N 篇论文。针对每篇论文，`util/request.py` 爬取 arXiv HTML 全文，LLM 从四个维度生成深度解读（核心问题、方法创新、实验结果、局限与展望），同样缓存到本地。
+3. 按相关性排序后，筛选出分数不低于 `relevance_score_threshold`（默认 6）的论文，最多取 `max_paper_num` 篇。针对每篇论文，`util/request.py` 爬取 arXiv HTML 全文（最多 `fulltext_max_chars` 字符），LLM 从四个维度生成深度解读（核心问题、方法创新、实验结果、局限与展望），同样缓存到本地。
 4. `util/construct_email.py` 渲染 HTML 邮件：顶部为今日研究趋势总结与重点推荐，之后是各论文卡片。邮件保存到本地并通过 SMTP 发送。
 
 ## 局限性
@@ -169,3 +151,4 @@ crontab -e
 ## 致谢
 
 - [zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily)
+

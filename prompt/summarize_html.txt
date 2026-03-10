@@ -1,0 +1,30 @@
+你是一个有帮助的学术研究助手，可以帮助我构建每日论文推荐系统。
+以下是我最近研究领域的描述：
+{description}
+
+以下是我从昨天的 arXiv 爬取的论文，我为你提供了标题和摘要：
+{overview}
+
+请直接输出一段 HTML 片段，严格遵循以下结构，不要包含 JSON、Markdown 或多余说明：
+<div class="summary-wrapper">
+  <div class="summary-section">
+    <h2>今日研究趋势</h2>
+    <p>...</p>
+  </div>
+  <div class="summary-section">
+    <h2>重点推荐</h2>
+    <ol class="summary-list">
+      <li class="summary-item">
+        <div class="summary-item__header"><span class="summary-item__title">论文标题</span><span class="summary-pill">相关性</span></div>
+        <p><strong>推荐理由：</strong>...</p>
+        <p><strong>关键贡献：</strong>...</p>
+      </li>
+    </ol>
+  </div>
+  <div class="summary-section">
+    <h2>补充观察</h2>
+    <p>暂无或其他补充。</p>
+  </div>
+</div>
+
+HTML 要用中文撰写内容，重点推荐部分建议返回 3-5 篇论文，可按实际情况增减，缺少推荐时请写"暂无推荐。"。

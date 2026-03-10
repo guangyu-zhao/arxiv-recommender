@@ -1,12 +1,10 @@
-<h1 align="center">ArXiv-Recommender</h1>
+# ArXiv-Recommender
 
-<p align="center">
-  <a href="./README.md">English</a> | <a href="./README-zh.md">中文</a>
-</p>
+[English](./README.md) | [中文](./README-zh.md)
 
 ---
 
-<p align="center">Recommend new arXiv papers of your interest daily according to your customized description.</p>
+Recommend new arXiv papers of your interest daily according to your customized description.
 
 > [!NOTE]
 > This repo borrows the idea and some functions from [zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily). Thanks for their great work!
@@ -20,7 +18,7 @@
 - Save recommendation history as Markdown and HTML locally.
 - Support multiple workers to speed up the recommendation process.
 - **Result caching**: LLM scores, full-text analyses, and rendered emails are cached by date — safe to rerun without extra API calls.
-- Support multiple recipients (comma-separated).
+- Support multiple recipients (space-separated).
 
 ## Quick Start
 
@@ -71,47 +69,14 @@ I'm not interested in the following fields:
 
 The project uses a unified interface: `--base_url`, `--model`, and `--api_key`. It works with any OpenAI-compatible API.
 
-**OpenAI:**
-
-```bash
-python main.py --categories cs.CV cs.AI \
-    --model gpt-4o \
-    --base_url https://api.openai.com/v1 --api_key YOUR_API_KEY \
-    --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender YOUR_EMAIL@qq.com --receiver RECEIVER@gmail.com \
-    --sender_password YOUR_SMTP_PASSWORD \
-    --num_workers 16 --temperature 0.7 --save
-```
-
-**SiliconFlow (DeepSeek, etc.):**
-
 ```bash
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key YOUR_API_KEY \
     --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender YOUR_EMAIL@qq.com --receiver RECEIVER@gmail.com \
+    --sender YOUR_EMAIL@qq.com --receivers RECEIVER@gmail.com \
     --sender_password YOUR_SMTP_PASSWORD \
     --num_workers 16 --temperature 0.7 --save
-```
-
-**Local Ollama (via its OpenAI-compatible endpoint):**
-
-```bash
-python main.py --categories cs.CV cs.AI \
-    --model deepseek-r1:7b \
-    --base_url http://localhost:11434/v1 --api_key ollama \
-    --smtp_server smtp.qq.com --smtp_port 465 \
-    --sender YOUR_EMAIL@qq.com --receiver RECEIVER@gmail.com \
-    --sender_password YOUR_SMTP_PASSWORD \
-    --num_workers 4 --temperature 0.7 --save
-```
-
-Or use the provided shell scripts:
-
-```bash
-bash main_gpt.sh
-bash main_silicon_flow.sh
 ```
 
 ### 5. (Optional) Run Automatically Every Day
@@ -128,9 +93,20 @@ Add the following line to run at 5:00 AM daily:
 0 5 * * * /path/to/customize-arxiv-daily/main_gpt.sh
 ```
 
-### 6. (Optional) Customize LLM Prompt
+### 6. (Optional) Tune Search & Recommendation Parameters
 
-Edit the `get_response()` method in `arxiv_daily.py` to adjust how the LLM evaluates each paper, or edit `get_full_analysis()` to change the dimensions of the full-text deep analysis.
+Edit `config.yaml` to control the core recommendation behavior:
+
+| Key | Description |
+|-----|-------------|
+| `max_entries` | Max papers fetched per category from arXiv |
+| `max_paper_num` | Max papers in the final recommendation |
+| `relevance_score_threshold` | Min relevance score (0–10) to enter full-text analysis |
+| `fulltext_max_chars` | Max characters read when fetching full text |
+
+### 7. (Optional) Customize LLM Prompt
+
+Edit the prompt templates in the `prompt/` directory to adjust how the LLM evaluates each paper or changes the dimensions of the full-text deep analysis.
 
 ## Parameters
 
@@ -143,7 +119,7 @@ Edit the `get_response()` method in `arxiv_daily.py` to adjust how the LLM evalu
 | `--smtp_server` | SMTP server host | Required |
 | `--smtp_port` | SMTP server port | Required |
 | `--sender` | Sender email address | Required |
-| `--receiver` | Receiver email(s), comma-separated | Required |
+| `--receivers` | Receiver email(s), space-separated | Required |
 | `--sender_password` | SMTP auth code | Required |
 | `--max_paper_num` | Max papers to recommend | 20 |
 | `--max_entries` | Max papers to fetch per category | 100 |
@@ -158,7 +134,7 @@ Edit the `get_response()` method in `arxiv_daily.py` to adjust how the LLM evalu
 
 1. `util/request.py` crawls the arXiv "new" page for each category and extracts paper metadata (title, abstract, PDF URL, etc.).
 2. `arxiv_daily.py` calls an LLM (via OpenAI-compatible API) in parallel to summarize every paper and score its relevance (0–10) against your research description. Results are cached locally by date.
-3. Papers are sorted by relevance and the top N are selected. For each top paper, `util/request.py` fetches the HTML full text from arXiv, and the LLM generates a 4-dimension deep analysis (core problem, method innovation, experimental results, limitations & future work). These are also cached.
+3. Papers are sorted by relevance. Those scoring above `relevance_score_threshold` (default 6) are selected, up to `max_paper_num`. For each selected paper, `util/request.py` fetches the HTML full text from arXiv (up to `fulltext_max_chars` characters), and the LLM generates a 4-dimension deep analysis (core problem, method innovation, experimental results, limitations & future work). These are also cached.
 4. `util/construct_email.py` renders an HTML email: a trend summary + key paper highlights at the top, followed by individual paper cards. The email is saved locally and sent via SMTP.
 
 ## Limitations

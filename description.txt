@@ -1,10 +1,11 @@
-I am working on the research area of computer vision and natural language processing. 
-Specifically, I am interested in the following fieds:
-1. Object detection
-2. AIGC (AI Generated Content)
-3. Multimodal Large Language Models
+我是一个机器学习领域的博士生，在研究具身智能，偏重于“操作”类任务。我重点关注以下研究方向：
+1. VLA (vision-language-action models) 模型中的记忆，利用历史信息来做决策
+2. 机器人操作策略上的 RAG（检索增强生成），通过检索以前的成功经验、成功轨迹，来提高后续的任务性能
+3. 因果推断和具身智能的结合，利用因果推断相关的理论，来增强具身智能模型的泛化性
 
-I'm not interested in the following fields:
-1. 3D Vision
-2. Robotics
-3. Low-level Vision
+我对下列研究问题不感兴趣：
+1. 机器人硬件、数据收集设备的硬件
+2. 具身智能和触觉的结合
+3. 人机交互
+4. 机械控制、自动控制理论
+5. 纯导航类任务的机器人研究

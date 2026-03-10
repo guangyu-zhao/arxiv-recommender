@@ -1,0 +1,15 @@
+# 每个分类从 arXiv 最多抓取的论文数量
+# Max papers to fetch per category from arXiv
+max_entries: 100
+
+# 最终推荐的论文最大数量
+# Max number of papers in the final recommendation
+max_paper_num: 20
+
+# 相关度分数过滤阈值（低于此分数的论文不进入全文精读）
+# Relevance score threshold; papers below this are excluded from full-text analysis
+relevance_score_threshold: 6
+
+# 全文精读时的最大字符数截断
+# Max characters to read when fetching full text
+fulltext_max_chars: 12000

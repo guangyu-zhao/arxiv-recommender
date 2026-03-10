@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-def get_yesterday_arxiv_papers(category: str = "cs.CV", max_results: int = 100):
+def get_yesterday_arxiv_papers(category: str, max_results: int):
     url = f"https://arxiv.org/list/{category}/new?skip=0&show={max_results}"
 
     response = requests.get(url)
@@ -56,7 +56,7 @@ def get_yesterday_arxiv_papers(category: str = "cs.CV", max_results: int = 100):
     return papers
 
 
-def get_paper_fulltext(arxiv_id: str, max_chars: int = 12000) -> str:
+def get_paper_fulltext(arxiv_id: str, max_chars: int) -> str:
     """从 arXiv HTML 页面爬取论文全文，返回纯文本；若不可用则返回空字符串。"""
     url = f"https://arxiv.org/html/{arxiv_id}"
     try:
@@ -92,5 +92,5 @@ def get_paper_fulltext(arxiv_id: str, max_chars: int = 12000) -> str:
 
 
 if __name__ == "__main__":
-    papers = get_yesterday_arxiv_papers()
+    papers = get_yesterday_arxiv_papers("cs.CV", 100)
     print(len(papers))

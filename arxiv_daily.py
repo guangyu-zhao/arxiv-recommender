@@ -27,8 +27,12 @@ class ArxivDaily:
         num_workers: int,
         temperature: float,
         save_dir: str | None,
+        relevance_score_threshold: float = 6,
+        fulltext_max_chars: int = 12000,
     ):
         self.max_paper_num = max_paper_num
+        self.relevance_score_threshold = relevance_score_threshold
+        self.fulltext_max_chars = fulltext_max_chars
         self.save_dir = save_dir
         self.num_workers = num_workers
         self.temperature = temperature
@@ -54,30 +58,20 @@ class ArxivDaily:
         self.description = description
         self.lock = threading.Lock()
 
-    def get_response(self, title, abstract):
-        prompt = """
-            你是一个有帮助的学术研究助手，可以帮助我构建每日论文推荐系统。
-            以下是我最近研究领域的描述：
-            {}
-        """.format(self.description)
-        prompt += """
-            以下是我从昨天的 arXiv 爬取的论文，我为你提供了标题和摘要：
-            标题: {}
-            摘要: {}
-        """.format(title, abstract)
-        prompt += """
-            1. 总结这篇论文的主要内容。
-            2. 请评估这篇论文与我研究领域的相关性，并给出 0-10 的评分。其中 0 表示完全不相关，10 表示高度相关。
-            
-            请按以下 JSON 格式给出你的回答：
-            {
-                "summary": <你的总结>,
-                "relevance": <你的评分>
-            }
-            使用中文回答。
-            直接返回上述 JSON 格式，无需任何额外解释。
-        """
+        # Load prompt templates
+        prompt_dir = os.path.join(base_dir, "prompt")
+        def _load_prompt(name):
+            with open(os.path.join(prompt_dir, name), "r", encoding="utf-8") as f:
+                return f.read()
+        self._tpl_paper_scoring = _load_prompt("paper_scoring.txt")
+        self._tpl_full_analysis = _load_prompt("full_analysis.txt")
+        self._tpl_summarize_json = _load_prompt("summarize_json.txt")
+        self._tpl_summarize_html = _load_prompt("summarize_html.txt")
 
+    def get_response(self, title, abstract):
+        prompt = self._tpl_paper_scoring.format(
+            description=self.description, title=title, abstract=abstract
+        )
         response = self.model.inference(prompt, temperature=self.temperature)
         return response
 
@@ -143,25 +137,9 @@ class ArxivDaily:
                 time.sleep(1)  # 重试前等待1秒
 
     def get_full_analysis(self, title: str, abstract: str, fulltext: str) -> str:
-        prompt = f"""你是一个专业的学术论文解读助手。以下是一篇论文的内容：
-
-【标题】
-{title}
-
-【摘要】
-{abstract}
-
-【论文正文节选】
-{fulltext}
-
-请从以下四个维度对这篇论文进行简明深入的解读，每个维度用 2~3 句话概括，使用中文：
-
-1. 核心问题：这篇论文瞄准了什么科学或工程挑战？
-2. 方法创新：提出了哪些新方法或新模块，有何独特的设计思路？
-3. 实验结果：主要量化指标和结论是什么，相比已有方法性能提升幅度如何？
-4. 局限与展望：作者指出了哪些局限性，以及未来的研究方向是什么？
-
-请直接输出解读内容，无需额外格式或前缀。"""
+        prompt = self._tpl_full_analysis.format(
+            title=title, abstract=abstract, fulltext=fulltext
+        )
         return self.model.inference(prompt, temperature=self.temperature)
 
     def enrich_with_fulltext(self, recommendations: list) -> list:
@@ -184,7 +162,7 @@ class ArxivDaily:
                 except (json.JSONDecodeError, OSError) as e:
                     print(f"全文分析缓存读取失败: {e}，将重新获取。")
 
-            fulltext = get_paper_fulltext(arxiv_id)
+            fulltext = get_paper_fulltext(arxiv_id, max_chars=self.fulltext_max_chars)
             if fulltext:
                 try:
                     analysis = self.get_full_analysis(paper["title"], paper["abstract"], fulltext)
@@ -234,7 +212,10 @@ class ArxivDaily:
 
         recommendations_ = sorted(
             recommendations_, key=lambda x: x["relevance_score"], reverse=True
-        )[: self.max_paper_num]
+        )
+        recommendations_ = [p for p in recommendations_ if p["relevance_score"] >= self.relevance_score_threshold][
+            : self.max_paper_num
+        ]
 
         # Save recommendation to markdown file
         current_time = self.run_datetime
@@ -262,62 +243,12 @@ class ArxivDaily:
         overview = ""
         for i in range(len(recommendations)):
             overview += f"{i + 1}. {recommendations[i]['title']} - {recommendations[i]['summary']} \n"
-        prompt_context = """
-            你是一个有帮助的学术研究助手，可以帮助我构建每日论文推荐系统。
-            以下是我最近研究领域的描述：
-            {}
-        """.format(self.description)
-        papers_context = """
-            以下是我从昨天的 arXiv 爬取的论文，我为你提供了标题和摘要：
-            {}
-        """.format(overview)
-        json_instruction = """
-            请务必严格按照以下 JSON 结构返回内容，不要添加额外文本或代码块：
-            {{
-              "trend_summary": "<总体趋势，用中文,使用 html 的语法，不要使用 markdown 的语法>",
-              "recommendations": [
-                {{
-                  "title": "<论文标题>",
-                  "relevance_label": "<高度相关/相关/一般相关>",
-                  "recommend_reason": "<为什么值得我读>",
-                  "key_contribution": "<一句话概括论文关键贡献>"
-                }}
-              ],
-              "additional_observation": "<补充观察，若无请写‘暂无’>"
-            }}
-
-            任务要求：
-            1. 给出今天论文体现的整体研究趋势，解释其与我研究兴趣的联系。
-            2. 精选最值得我精读的论文（建议返回 3-5 篇，可按实际情况增减），说明推荐理由并突出关键贡献。
-            3. 如有需要持续关注或潜在风险的方向，请在补充观察中说明；若没有请写“暂无”。
-        """
-        html_instruction = """
-            请直接输出一段 HTML 片段，严格遵循以下结构，不要包含 JSON、Markdown 或多余说明：
-            <div class="summary-wrapper">
-              <div class="summary-section">
-                <h2>今日研究趋势</h2>
-                <p>...</p>
-              </div>
-              <div class="summary-section">
-                <h2>重点推荐</h2>
-                <ol class="summary-list">
-                  <li class="summary-item">
-                    <div class="summary-item__header"><span class="summary-item__title">论文标题</span><span class="summary-pill">相关性</span></div>
-                    <p><strong>推荐理由：</strong>...</p>
-                    <p><strong>关键贡献：</strong>...</p>
-                  </li>
-                </ol>
-              </div>
-              <div class="summary-section">
-                <h2>补充观察</h2>
-                <p>暂无或其他补充。</p>
-              </div>
-            </div>
-
-            HTML 要用中文撰写内容，重点推荐部分建议返回 3-5 篇论文，可按实际情况增减，缺少推荐时请写“暂无推荐。”。
-        """
-        prompt = prompt_context + papers_context + json_instruction
-        html_prompt = prompt_context + papers_context + html_instruction
+        prompt = self._tpl_summarize_json.format(
+            description=self.description, overview=overview
+        )
+        html_prompt = self._tpl_summarize_html.format(
+            description=self.description, overview=overview
+        )
 
         def _clean_model_response(raw_text: str) -> str:
             cleaned = raw_text.strip()
@@ -434,7 +365,7 @@ class ArxivDaily:
     def send_email(
         self,
         sender: str,
-        receiver: str,
+        receivers: list[str],
         password: str,
         smtp_server: str,
         smtp_port: int,
@@ -451,21 +382,12 @@ class ArxivDaily:
         msg = MIMEText(html, "html", "utf-8")
         msg["From"] = _format_addr(f"{title} <%s>" % sender)
 
-        # 处理多个接收者
-        receivers = [addr.strip() for addr in receiver.split(",")]
-        print(receivers)
         msg["To"] = ",".join([_format_addr(f"You <%s>" % addr) for addr in receivers])
 
         today = self.run_datetime.strftime("%Y/%m/%d")
         msg["Subject"] = Header(f"{title} {today}", "utf-8").encode()
 
-        try:
-            server = smtplib.SMTP(smtp_server, smtp_port)
-            server.starttls()
-        except Exception as e:
-            logger.warning(f"Failed to use TLS. {e}")
-            logger.warning(f"Try to use SSL.")
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
 
         server.login(sender, password)
         server.sendmail(sender, receivers, msg.as_string())

@@ -2,12 +2,19 @@ from arxiv_daily import ArxivDaily
 from llm import GPT
 import argparse
 import os
+import yaml
+
+def load_config(path="config.yaml"):
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
 
 if __name__ == "__main__":
+    cfg = load_config()
+
     parser = argparse.ArgumentParser(description="Arxiv Daily")
     parser.add_argument("--categories", nargs="+", required=True, help="arXiv categories, e.g. cs.CV cs.AI")
-    parser.add_argument("--max_paper_num", type=int, default=20, help="Max papers to recommend")
-    parser.add_argument("--max_entries", type=int, default=100, help="Max entries to fetch per category")
+    parser.add_argument("--max_paper_num", type=int, default=cfg["max_paper_num"], help="Max papers to recommend")
+    parser.add_argument("--max_entries", type=int, default=cfg["max_entries"], help="Max entries to fetch per category")
 
     parser.add_argument("--model", type=str, required=True, help="Model name, e.g. gpt-4o")
     parser.add_argument("--base_url", type=str, required=True, help="API base URL, e.g. https://api.openai.com/v1")
@@ -20,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--smtp_server", type=str, required=True, help="SMTP server host")
     parser.add_argument("--smtp_port", type=int, required=True, help="SMTP server port")
     parser.add_argument("--sender", type=str, required=True, help="Sender email address")
-    parser.add_argument("--receiver", type=str, required=True, help="Receiver email(s), comma-separated")
+    parser.add_argument("--receivers", nargs="+", required=True, help="Receiver email(s), space-separated")
     parser.add_argument("--sender_password", type=str, required=True, help="SMTP auth password")
 
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -56,11 +63,13 @@ if __name__ == "__main__":
         args.num_workers,
         args.temperature,
         args.save_dir,
+        relevance_score_threshold=cfg["relevance_score_threshold"],
+        fulltext_max_chars=cfg["fulltext_max_chars"],
     )
 
     arxiv_daily.send_email(
         args.sender,
-        args.receiver,
+        args.receivers,
         args.sender_password,
         args.smtp_server,
         args.smtp_port,
