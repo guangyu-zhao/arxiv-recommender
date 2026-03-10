@@ -1,0 +1,13 @@
+[project]
+name = "customize-arxiv-daily"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bs4>=0.0.2",
+    "loguru>=0.7.3",
+    "openai>=1.108.1",
+    "requests>=2.32.5",
+    "tqdm>=4.67.1",
+]

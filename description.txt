@@ -1,0 +1,10 @@
+I am working on the research area of computer vision and natural language processing. 
+Specifically, I am interested in the following fieds:
+1. Object detection
+2. AIGC (AI Generated Content)
+3. Multimodal Large Language Models
+
+I'm not interested in the following fields:
+1. 3D Vision
+2. Robotics
+3. Low-level Vision

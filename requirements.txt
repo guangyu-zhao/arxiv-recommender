@@ -1,0 +1,5 @@
+tqdm
+loguru
+openai
+requests
+bs4
