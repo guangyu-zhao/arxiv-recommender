@@ -27,8 +27,8 @@ class ArxivDaily:
         num_workers: int,
         temperature: float,
         save_dir: str | None,
-        relevance_score_threshold: float = 6,
-        fulltext_max_chars: int = 12000,
+        relevance_score_threshold: float = 7,
+        fulltext_max_chars: int = 200000,
     ):
         self.max_paper_num = max_paper_num
         self.relevance_score_threshold = relevance_score_threshold
