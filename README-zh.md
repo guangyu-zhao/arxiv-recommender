@@ -52,7 +52,7 @@ uv sync
 
 ### 3. 描述你的研究兴趣
 
-编辑 `description.txt`，写下你感兴趣和不感兴趣的研究方向：
+你可以创建多个研究兴趣描述文件（如 `description.txt`、`description_robotics.txt`），分别写下感兴趣和不感兴趣的研究方向：
 
 ```txt
 I am working on the research area of computer vision.
@@ -75,6 +75,7 @@ I'm not interested in the following fields:
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key 你的API密钥 \
+    --description_file description.txt \
     --smtp_server smtp.qq.com --smtp_port 465 \
     --sender 你的邮箱@qq.com --receivers 接收邮箱@gmail.com \
     --sender_password 你的SMTP授权码 \
@@ -133,7 +134,7 @@ crontab -e
 | `--title`           | 邮件标题前缀                               | `Daily arXiv`     |
 | `--save`            | 是否保存结果到本地                            | 关闭                |
 | `--save_dir`        | 保存目录                                 | `./arxiv_history` |
-| `--description`     | 研究兴趣描述文件路径                           | `description.txt` |
+| `--description_file` | 研究兴趣描述文件路径（支持相对路径和绝对路径）             | `description.txt` |
 
 
 ## 工作原理

@@ -22,7 +22,18 @@ if __name__ == "__main__":
 
     parser.add_argument("--save", action="store_true", help="Save results to local files")
     parser.add_argument("--save_dir", type=str, default="./arxiv_history")
-    parser.add_argument("--description", type=str, default="description.txt", help="Path to research interests file")
+    parser.add_argument(
+        "--description_file",
+        type=str,
+        default="description.txt",
+        help="Path to research interests file (supports relative or absolute path)",
+    )
+    parser.add_argument(
+        "--description",
+        type=str,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
 
     parser.add_argument("--smtp_server", type=str, required=True, help="SMTP server host")
     parser.add_argument("--smtp_port", type=int, required=True, help="SMTP server port")
@@ -36,8 +47,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    with open(args.description, "r") as f:
-        args.description = f.read()
+    description_path_arg = args.description if args.description else args.description_file
+    description_path = os.path.expanduser(description_path_arg)
+    with open(description_path, "r", encoding="utf-8") as f:
+        description_text = f.read()
 
     # Test LLM availability
     try:
@@ -59,7 +72,7 @@ if __name__ == "__main__":
         args.model,
         args.base_url,
         args.api_key,
-        args.description,
+        description_text,
         args.num_workers,
         args.temperature,
         args.save_dir,

@@ -50,7 +50,7 @@ You need an email account with SMTP access to send emails. Common providers:
 
 ### 3. Describe Your Research Interests
 
-Edit `description.txt` to describe the research fields you're interested in (and those you're not):
+Create one or more description files (for example `description.txt`, `description_robotics.txt`) to describe your research interests and non-interests:
 
 ```txt
 I am working on the research area of computer vision.
@@ -73,6 +73,7 @@ The project uses a unified interface: `--base_url`, `--model`, and `--api_key`. 
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key YOUR_API_KEY \
+    --description_file description.txt \
     --smtp_server smtp.qq.com --smtp_port 465 \
     --sender YOUR_EMAIL@qq.com --receivers RECEIVER@gmail.com \
     --sender_password YOUR_SMTP_PASSWORD \
@@ -128,7 +129,7 @@ Edit the prompt templates in the `prompt/` directory to adjust how the LLM evalu
 | `--title` | Email subject prefix | `Daily arXiv` |
 | `--save` | Save Markdown & HTML locally | Off |
 | `--save_dir` | Save directory | `./arxiv_history` |
-| `--description` | Path to research interests file | `description.txt` |
+| `--description_file` | Path to research interests file (relative or absolute) | `description.txt` |
 
 ## How It Works
 

@@ -6,5 +6,6 @@ __pycache__
 .env
 .ruff_cache
 arxiv_history
+description/
 description.txt
 main.sh
