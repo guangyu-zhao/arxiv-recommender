@@ -42,15 +42,42 @@ class ArxivDaily:
         self.cache_dir = os.path.join(base_dir, save_dir, self.run_date, "json")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.papers = {}
+        
+        # Load seen arXiv IDs to avoid duplicate processing
+        self.seen_ids = set()
+        if self.save_dir:
+            self.seen_ids_path = os.path.join(base_dir, self.save_dir, "seen_arxiv_ids.json")
+            if os.path.exists(self.seen_ids_path):
+                try:
+                    with open(self.seen_ids_path, "r", encoding="utf-8") as f:
+                        self.seen_ids = set(json.load(f))
+                except (json.JSONDecodeError, OSError) as e:
+                    print(f"Failed to load seen_arxiv_ids.json: {e}")
+
         for category in categories:
-            self.papers[category] = get_yesterday_arxiv_papers(category, max_entries)
+            fetched_papers = get_yesterday_arxiv_papers(category, max_entries)
+            new_papers = []
+            for paper in fetched_papers:
+                if paper["arXiv_id"] not in self.seen_ids:
+                    new_papers.append(paper)
+                    self.seen_ids.add(paper["arXiv_id"])
+                    
+            self.papers[category] = new_papers
             print(
-                "{} papers on arXiv for {} are fetched.".format(
-                    len(self.papers[category]), category
+                "{} new papers on arXiv for {} are fetched (out of {} total).".format(
+                    len(self.papers[category]), category, len(fetched_papers)
                 )
             )
             sleep_time = random.randint(5, 15)
             time.sleep(sleep_time)
+
+        # Save updated seen arXiv IDs
+        if self.save_dir:
+            try:
+                with open(self.seen_ids_path, "w", encoding="utf-8") as f:
+                    json.dump(list(self.seen_ids), f, ensure_ascii=False, indent=2)
+            except OSError as e:
+                print(f"Failed to save seen_arxiv_ids.json: {e}")
 
         self.model = GPT(model, base_url, api_key)
         print(f"Model initialized successfully. Using {model} at {base_url}.")
