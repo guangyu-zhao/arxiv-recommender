@@ -38,15 +38,24 @@ class ArxivDaily:
         self.temperature = temperature
         self.run_datetime = datetime.now(timezone.utc)
         self.run_date = self.run_datetime.strftime("%Y-%m-%d")
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.cache_dir = os.path.join(base_dir, save_dir, self.run_date, "json")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.save_root = None
+        if self.save_dir:
+            expanded_save_dir = os.path.expanduser(self.save_dir)
+            if os.path.isabs(expanded_save_dir):
+                self.save_root = expanded_save_dir
+            else:
+                self.save_root = os.path.join(self.base_dir, expanded_save_dir)
+        self.cache_dir = None
+        if self.save_root:
+            self.cache_dir = os.path.join(self.save_root, self.run_date, "json")
+            os.makedirs(self.cache_dir, exist_ok=True)
         self.papers = {}
         
         # Load seen arXiv IDs to avoid duplicate processing
         self.seen_ids = set()
-        if self.save_dir:
-            self.seen_ids_path = os.path.join(base_dir, self.save_dir, "seen_arxiv_ids.json")
+        if self.save_root:
+            self.seen_ids_path = os.path.join(self.save_root, "seen_arxiv_ids.json")
             if os.path.exists(self.seen_ids_path):
                 try:
                     with open(self.seen_ids_path, "r", encoding="utf-8") as f:
@@ -72,7 +81,7 @@ class ArxivDaily:
             time.sleep(sleep_time)
 
         # Save updated seen arXiv IDs
-        if self.save_dir:
+        if self.save_root:
             try:
                 with open(self.seen_ids_path, "w", encoding="utf-8") as f:
                     json.dump(list(self.seen_ids), f, ensure_ascii=False, indent=2)
@@ -86,7 +95,7 @@ class ArxivDaily:
         self.lock = threading.Lock()
 
         # Load prompt templates
-        prompt_dir = os.path.join(base_dir, "prompt")
+        prompt_dir = os.path.join(self.base_dir, "prompt")
         def _load_prompt(name):
             with open(os.path.join(prompt_dir, name), "r", encoding="utf-8") as f:
                 return f.read()
@@ -104,9 +113,13 @@ class ArxivDaily:
 
     def process_paper(self, paper, max_retries=5):
         retry_count = 0
-        cache_path = os.path.join(self.cache_dir, f"{paper['arXiv_id']}.json")
+        cache_path = (
+            os.path.join(self.cache_dir, f"{paper['arXiv_id']}.json")
+            if self.cache_dir
+            else None
+        )
 
-        if os.path.exists(cache_path):
+        if cache_path and os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as cache_file:
                     cached_result = json.load(cache_file)
@@ -132,12 +145,13 @@ class ArxivDaily:
                     "relevance_score": relevance_score,
                     "pdf_url": paper["pdf_url"],
                 }
-                try:
-                    with self.lock:
-                        with open(cache_path, "w", encoding="utf-8") as cache_file:
-                            json.dump(result, cache_file, ensure_ascii=False, indent=2)
-                except OSError as write_error:
-                    print(f"写入缓存 {cache_path} 时失败: {write_error}")
+                if cache_path:
+                    try:
+                        with self.lock:
+                            with open(cache_path, "w", encoding="utf-8") as cache_file:
+                                json.dump(result, cache_file, ensure_ascii=False, indent=2)
+                    except OSError as write_error:
+                        print(f"写入缓存 {cache_path} 时失败: {write_error}")
                 return result
             except Exception as e:
                 retry_count += 1
@@ -154,12 +168,13 @@ class ArxivDaily:
                         "relevance_score": 10,
                         "pdf_url": paper.get("pdf_url", ""),
                     }
-                    try:
-                        with self.lock:
-                            with open(cache_path, "w", encoding="utf-8") as cache_file:
-                                json.dump(result, cache_file, ensure_ascii=False, indent=2)
-                    except OSError as write_error:
-                        print(f"写入缓存 {cache_path} 时失败: {write_error}")
+                    if cache_path:
+                        try:
+                            with self.lock:
+                                with open(cache_path, "w", encoding="utf-8") as cache_file:
+                                    json.dump(result, cache_file, ensure_ascii=False, indent=2)
+                        except OSError as write_error:
+                            print(f"写入缓存 {cache_path} 时失败: {write_error}")
                     return result
                 time.sleep(1)  # 重试前等待1秒
 
@@ -176,10 +191,14 @@ class ArxivDaily:
         print("Fetching full text and generating detailed analysis...")
         for paper in tqdm(recommendations, desc="Full-text analysis"):
             arxiv_id = paper["arXiv_id"]
-            cache_path = os.path.join(self.cache_dir, f"{arxiv_id}_fulltext.json")
+            cache_path = (
+                os.path.join(self.cache_dir, f"{arxiv_id}_fulltext.json")
+                if self.cache_dir
+                else None
+            )
 
             # 优先读缓存
-            if os.path.exists(cache_path):
+            if cache_path and os.path.exists(cache_path):
                 try:
                     with open(cache_path, "r", encoding="utf-8") as f:
                         cached = json.load(f)
@@ -201,12 +220,13 @@ class ArxivDaily:
 
             paper["full_analysis"] = analysis
 
-            try:
-                with self.lock:
-                    with open(cache_path, "w", encoding="utf-8") as f:
-                        json.dump({"full_analysis": analysis}, f, ensure_ascii=False, indent=2)
-            except OSError as e:
-                print(f"写入全文分析缓存失败 ({arxiv_id}): {e}")
+            if cache_path:
+                try:
+                    with self.lock:
+                        with open(cache_path, "w", encoding="utf-8") as f:
+                            json.dump({"full_analysis": analysis}, f, ensure_ascii=False, indent=2)
+                except OSError as e:
+                    print(f"写入全文分析缓存失败 ({arxiv_id}): {e}")
 
         return recommendations
 
@@ -245,24 +265,26 @@ class ArxivDaily:
         ]
 
         # Save recommendation to markdown file
-        current_time = self.run_datetime
-        save_path = os.path.join(
-            self.save_dir, self.run_date, f"{current_time.strftime('%Y-%m-%d')}.md"
-        )
-        with open(save_path, "w") as f:
-            f.write("# Daily arXiv Papers\n")
-            f.write(f"## Date: {current_time.strftime('%Y-%m-%d')}\n")
-            f.write(f"## Description: {self.description}\n")
-            f.write("## Papers:\n")
-            for i, paper in enumerate(recommendations_):
-                f.write(f"### {i + 1}. {paper['title']}\n")
-                f.write(f"#### Abstract:\n")
-                f.write(f"{paper['abstract']}\n")
-                f.write(f"#### Summary:\n")
-                f.write(f"{paper['summary']}\n")
-                f.write(f"#### Relevance Score: {paper['relevance_score']}\n")
-                f.write(f"#### PDF URL: {paper['pdf_url']}\n")
-                f.write("\n")
+        if self.save_root:
+            current_time = self.run_datetime
+            save_path = os.path.join(
+                self.save_root, self.run_date, f"{current_time.strftime('%Y-%m-%d')}.md"
+            )
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write("# Daily arXiv Papers\n")
+                f.write(f"## Date: {current_time.strftime('%Y-%m-%d')}\n")
+                f.write(f"## Description: {self.description}\n")
+                f.write("## Papers:\n")
+                for i, paper in enumerate(recommendations_):
+                    f.write(f"### {i + 1}. {paper['title']}\n")
+                    f.write(f"#### Abstract:\n")
+                    f.write(f"{paper['abstract']}\n")
+                    f.write(f"#### Summary:\n")
+                    f.write(f"{paper['summary']}\n")
+                    f.write(f"#### Relevance Score: {paper['relevance_score']}\n")
+                    f.write(f"#### PDF URL: {paper['pdf_url']}\n")
+                    f.write("\n")
 
         return recommendations_
 
@@ -355,8 +377,10 @@ class ArxivDaily:
                         return render_summary_sections(fallback_data)
 
     def render_email(self, recommendations):
-        save_file_path = os.path.join(self.save_dir, self.run_date, "arxiv_daily_email.html")
-        if os.path.exists(save_file_path):
+        save_file_path = None
+        if self.save_root:
+            save_file_path = os.path.join(self.save_root, self.run_date, "arxiv_daily_email.html")
+        if save_file_path and os.path.exists(save_file_path):
             with open(save_file_path, "r", encoding="utf-8") as f:
                 print(f"邮件已渲染，从缓存文件 {save_file_path} 读取邮件。")
                 return f.read()
@@ -381,9 +405,8 @@ class ArxivDaily:
         content += "<br>" + "</br><br>".join(parts) + "</br>"
         email_html = framework.replace("__CONTENT__", content)
         # 保存渲染后的邮件到 save_dir
-        if self.save_dir:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            save_path = os.path.join(base_dir, self.save_dir, self.run_date, "arxiv_daily_email.html")
+        if self.save_root:
+            save_path = os.path.join(self.save_root, self.run_date, "arxiv_daily_email.html")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as f:
                 f.write(email_html)

@@ -5,7 +5,8 @@ __pycache__
 .vscode
 .env
 .ruff_cache
-arxiv_history
+arxiv_history/
 description/
 description.txt
+scripts/
 main.sh

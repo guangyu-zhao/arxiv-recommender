@@ -25,14 +25,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--description_file",
         type=str,
-        default="description.txt",
+        required=True,
         help="Path to research interests file (supports relative or absolute path)",
-    )
-    parser.add_argument(
-        "--description",
-        type=str,
-        default=None,
-        help=argparse.SUPPRESS,
     )
 
     parser.add_argument("--smtp_server", type=str, required=True, help="SMTP server host")
@@ -47,8 +41,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    description_path_arg = args.description if args.description else args.description_file
-    description_path = os.path.expanduser(description_path_arg)
+    description_path = os.path.expanduser(args.description_file)
     with open(description_path, "r", encoding="utf-8") as f:
         description_text = f.read()
 
