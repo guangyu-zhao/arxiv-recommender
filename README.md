@@ -17,7 +17,7 @@ Recommend new arXiv papers of your interest daily according to your customized d
 - Summarize today's research trend and highlight key papers at the start of the email.
 - Save recommendation history as Markdown and HTML locally.
 - Support multiple workers to speed up the recommendation process.
-- **Result caching**: LLM scores, full-text analyses, and rendered emails are cached by date — safe to rerun without extra API calls.
+- **Result caching**: LLM scores, full-text analyses, and rendered emails are cached by profile and date — safe to rerun without extra API calls.
 - Support multiple recipients (space-separated).
 
 ## Quick Start
@@ -73,6 +73,7 @@ The project uses a unified interface: `--base_url`, `--model`, and `--api_key`. 
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key YOUR_API_KEY \
+    --profile memory \
     --description_file description.txt \
     --smtp_server smtp.qq.com --smtp_port 465 \
     --sender YOUR_EMAIL@qq.com --receivers RECEIVER@gmail.com \
@@ -129,14 +130,33 @@ Edit the prompt templates in the `prompt/` directory to adjust how the LLM evalu
 | `--title` | Email subject prefix | `Daily arXiv` |
 | `--save` | Save Markdown & HTML locally | Off |
 | `--save_dir` | Save directory | `./arxiv_history` |
+| `--profile` | Profile name used to isolate cache/history | Required |
 | `--description_file` | Path to research interests file (relative or absolute) | `description.txt` |
 
 ## How It Works
 
 1. `util/request.py` crawls the arXiv "new" page for each category and extracts paper metadata (title, abstract, PDF URL, etc.).
-2. `arxiv_daily.py` calls an LLM (via OpenAI-compatible API) in parallel to summarize every paper and score its relevance (0–10) against your research description. Results are cached locally by date.
+2. `arxiv_daily.py` calls an LLM (via OpenAI-compatible API) in parallel to summarize every paper and score its relevance (0–10) against your research description. Results are cached locally by profile and date.
 3. Papers are sorted by relevance. Those scoring above `relevance_score_threshold` (default 6) are selected, up to `max_paper_num`. For each selected paper, `util/request.py` fetches the HTML full text from arXiv (up to `fulltext_max_chars` characters), and the LLM generates a 4-dimension deep analysis (core problem, method innovation, experimental results, limitations & future work). These are also cached.
 4. `util/construct_email.py` renders an HTML email: a trend summary + key paper highlights at the top, followed by individual paper cards. The email is saved locally and sent via SMTP.
+
+When `--save` is enabled, outputs are isolated by profile:
+
+```txt
+arxiv_history/
+  memory/
+    seen_arxiv_ids.json
+    2026-06-19/
+      arxiv_daily_email.html
+      2026-06-19.md
+      json/
+  wam/
+    seen_arxiv_ids.json
+    2026-06-19/
+      arxiv_daily_email.html
+      2026-06-19.md
+      json/
+```
 
 ## Limitations
 

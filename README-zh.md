@@ -17,7 +17,7 @@
 - 邮件开头包含今日研究趋势总结和重点推荐论文。
 - 将推荐历史保存为 Markdown 和 HTML 文件。
 - 支持多线程并行加速推理过程。
-- **结果缓存**：LLM 评分、全文解读、渲染后的邮件均按日期缓存，重复运行不会重复消耗 API 调用。
+- **结果缓存**：LLM 评分、全文解读、渲染后的邮件均按 profile 和日期缓存，重复运行不会重复消耗 API 调用。
 - 支持多收件人（空格分隔）。
 
 ## 快速开始
@@ -75,6 +75,7 @@ I'm not interested in the following fields:
 python main.py --categories cs.CV cs.AI \
     --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
     --base_url https://api.siliconflow.cn/v1 --api_key 你的API密钥 \
+    --profile memory \
     --description_file description.txt \
     --smtp_server smtp.qq.com --smtp_port 465 \
     --sender 你的邮箱@qq.com --receivers 接收邮箱@gmail.com \
@@ -134,15 +135,34 @@ crontab -e
 | `--title`           | 邮件标题前缀                               | `Daily arXiv`     |
 | `--save`            | 是否保存结果到本地                            | 关闭                |
 | `--save_dir`        | 保存目录                                 | `./arxiv_history` |
+| `--profile`         | 用于隔离缓存与历史记录的 profile 名称               | 必填                |
 | `--description_file` | 研究兴趣描述文件路径（支持相对路径和绝对路径）             | `description.txt` |
 
 
 ## 工作原理
 
 1. `util/request.py` 爬取指定分类的 arXiv "new" 页面，提取论文元数据（标题、摘要、PDF 链接等）。
-2. `arxiv_daily.py` 通过 OpenAI 兼容 API 并行调用 LLM，对每篇论文进行总结并评估与研究兴趣的相关性（0–10 分）。结果按日期缓存到本地。
+2. `arxiv_daily.py` 通过 OpenAI 兼容 API 并行调用 LLM，对每篇论文进行总结并评估与研究兴趣的相关性（0–10 分）。结果按 profile 和日期缓存到本地。
 3. 按相关性排序后，筛选出分数不低于 `relevance_score_threshold`（默认 6）的论文，最多取 `max_paper_num` 篇。针对每篇论文，`util/request.py` 爬取 arXiv HTML 全文（最多 `fulltext_max_chars` 字符），LLM 从四个维度生成深度解读（核心问题、方法创新、实验结果、局限与展望），同样缓存到本地。
 4. `util/construct_email.py` 渲染 HTML 邮件：顶部为今日研究趋势总结与重点推荐，之后是各论文卡片。邮件保存到本地并通过 SMTP 发送。
+
+开启 `--save` 时，输出会按 profile 隔离：
+
+```txt
+arxiv_history/
+  memory/
+    seen_arxiv_ids.json
+    2026-06-19/
+      arxiv_daily_email.html
+      2026-06-19.md
+      json/
+  wam/
+    seen_arxiv_ids.json
+    2026-06-19/
+      arxiv_daily_email.html
+      2026-06-19.md
+      json/
+```
 
 ## 局限性
 

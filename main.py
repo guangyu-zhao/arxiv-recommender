@@ -28,6 +28,12 @@ if __name__ == "__main__":
         required=True,
         help="Path to research interests file (supports relative or absolute path)",
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        required=True,
+        help="Profile name used to isolate cache/history, e.g. memory or wam",
+    )
 
     parser.add_argument("--smtp_server", type=str, required=True, help="SMTP server host")
     parser.add_argument("--smtp_port", type=int, required=True, help="SMTP server port")
@@ -69,6 +75,7 @@ if __name__ == "__main__":
         args.num_workers,
         args.temperature,
         args.save_dir,
+        args.profile,
         relevance_score_threshold=cfg["relevance_score_threshold"],
         fulltext_max_chars=cfg["fulltext_max_chars"],
     )

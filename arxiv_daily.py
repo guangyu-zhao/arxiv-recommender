@@ -27,6 +27,7 @@ class ArxivDaily:
         num_workers: int,
         temperature: float,
         save_dir: str | None,
+        profile: str,
         relevance_score_threshold: float = 7,
         fulltext_max_chars: int = 200000,
     ):
@@ -38,24 +39,36 @@ class ArxivDaily:
         self.temperature = temperature
         self.run_datetime = datetime.now(timezone.utc)
         self.run_date = self.run_datetime.strftime("%Y-%m-%d")
+        profile_name = profile.strip()
+        if not profile_name:
+            profile_name = "default"
+        self.profile = "".join(
+            ch if (ch.isalnum() or ch in ("-", "_")) else "_"
+            for ch in profile_name
+        )
+        if not self.profile:
+            self.profile = "default"
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.save_root = None
+        self.profile_root = None
         if self.save_dir:
             expanded_save_dir = os.path.expanduser(self.save_dir)
             if os.path.isabs(expanded_save_dir):
                 self.save_root = expanded_save_dir
             else:
                 self.save_root = os.path.join(self.base_dir, expanded_save_dir)
+            self.profile_root = os.path.join(self.save_root, self.profile)
+            os.makedirs(self.profile_root, exist_ok=True)
         self.cache_dir = None
-        if self.save_root:
-            self.cache_dir = os.path.join(self.save_root, self.run_date, "json")
+        if self.profile_root:
+            self.cache_dir = os.path.join(self.profile_root, self.run_date, "json")
             os.makedirs(self.cache_dir, exist_ok=True)
         self.papers = {}
         
         # Load seen arXiv IDs to avoid duplicate processing
         self.seen_ids = set()
-        if self.save_root:
-            self.seen_ids_path = os.path.join(self.save_root, "seen_arxiv_ids.json")
+        if self.profile_root:
+            self.seen_ids_path = os.path.join(self.profile_root, "seen_arxiv_ids.json")
             if os.path.exists(self.seen_ids_path):
                 try:
                     with open(self.seen_ids_path, "r", encoding="utf-8") as f:
@@ -81,7 +94,7 @@ class ArxivDaily:
             time.sleep(sleep_time)
 
         # Save updated seen arXiv IDs
-        if self.save_root:
+        if self.profile_root:
             try:
                 with open(self.seen_ids_path, "w", encoding="utf-8") as f:
                     json.dump(list(self.seen_ids), f, ensure_ascii=False, indent=2)
@@ -265,10 +278,10 @@ class ArxivDaily:
         ]
 
         # Save recommendation to markdown file
-        if self.save_root:
+        if self.profile_root:
             current_time = self.run_datetime
             save_path = os.path.join(
-                self.save_root, self.run_date, f"{current_time.strftime('%Y-%m-%d')}.md"
+                self.profile_root, self.run_date, f"{current_time.strftime('%Y-%m-%d')}.md"
             )
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as f:
@@ -378,8 +391,8 @@ class ArxivDaily:
 
     def render_email(self, recommendations):
         save_file_path = None
-        if self.save_root:
-            save_file_path = os.path.join(self.save_root, self.run_date, "arxiv_daily_email.html")
+        if self.profile_root:
+            save_file_path = os.path.join(self.profile_root, self.run_date, "arxiv_daily_email.html")
         if save_file_path and os.path.exists(save_file_path):
             with open(save_file_path, "r", encoding="utf-8") as f:
                 print(f"邮件已渲染，从缓存文件 {save_file_path} 读取邮件。")
@@ -405,8 +418,8 @@ class ArxivDaily:
         content += "<br>" + "</br><br>".join(parts) + "</br>"
         email_html = framework.replace("__CONTENT__", content)
         # 保存渲染后的邮件到 save_dir
-        if self.save_root:
-            save_path = os.path.join(self.save_root, self.run_date, "arxiv_daily_email.html")
+        if self.profile_root:
+            save_path = os.path.join(self.profile_root, self.run_date, "arxiv_daily_email.html")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as f:
                 f.write(email_html)
@@ -467,7 +480,7 @@ if __name__ == "__main__":
     arxiv_daily = ArxivDaily(
         categories, max_entries, max_paper_num,
         model, base_url, api_key, description,
-        num_workers=4, temperature=0.7, save_dir="./arxiv_history",
+        num_workers=4, temperature=0.7, save_dir="./arxiv_history", profile="demo",
     )
     recommendations = arxiv_daily.get_recommendation()
     print(recommendations)
