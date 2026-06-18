@@ -10,3 +10,5 @@ description/
 description.txt
 scripts/
 main.sh
+arxiv_cron.log
+arxiv_cron.err.log
