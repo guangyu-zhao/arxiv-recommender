@@ -5,6 +5,8 @@ from tqdm import tqdm
 import json
 import os
 from datetime import datetime, timezone
+import fcntl
+import tempfile
 import time
 import random
 import smtplib
@@ -30,6 +32,11 @@ class ArxivDaily:
         profile: str,
         relevance_score_threshold: float = 7,
         fulltext_max_chars: int = 200000,
+        llm_requests_per_minute: float | None = 30,
+        llm_max_attempts: int = 6,
+        llm_retry_base_seconds: float = 2,
+        arxiv_timeout_seconds: float = 30,
+        arxiv_max_attempts: int = 5,
     ):
         self.max_paper_num = max_paper_num
         self.relevance_score_threshold = relevance_score_threshold
@@ -37,6 +44,8 @@ class ArxivDaily:
         self.save_dir = save_dir
         self.num_workers = num_workers
         self.temperature = temperature
+        self.arxiv_timeout_seconds = arxiv_timeout_seconds
+        self.arxiv_max_attempts = arxiv_max_attempts
         self.run_datetime = datetime.now(timezone.utc)
         self.run_date = self.run_datetime.strftime("%Y-%m-%d")
         profile_name = profile.strip()
@@ -64,27 +73,65 @@ class ArxivDaily:
             self.cache_dir = os.path.join(self.profile_root, self.run_date, "json")
             os.makedirs(self.cache_dir, exist_ok=True)
         self.papers = {}
-        
+
         # Load seen arXiv IDs to avoid duplicate processing
         self.seen_ids = set()
+        self.successfully_processed_ids = set()
+        self.pending_papers = {}
         if self.profile_root:
             self.seen_ids_path = os.path.join(self.profile_root, "seen_arxiv_ids.json")
+            self.pending_papers_path = os.path.join(
+                self.profile_root, "pending_arxiv_papers.json"
+            )
             if os.path.exists(self.seen_ids_path):
                 try:
                     with open(self.seen_ids_path, "r", encoding="utf-8") as f:
                         self.seen_ids = set(json.load(f))
                 except (json.JSONDecodeError, OSError) as e:
                     print(f"Failed to load seen_arxiv_ids.json: {e}")
+            if os.path.exists(self.pending_papers_path):
+                try:
+                    with open(self.pending_papers_path, "r", encoding="utf-8") as f:
+                        pending_items = json.load(f)
+                    self.pending_papers = {
+                        paper["arXiv_id"]: paper
+                        for paper in pending_items
+                        if paper["arXiv_id"] not in self.seen_ids
+                    }
+                except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
+                    raise RuntimeError(
+                        f"Failed to load pending_arxiv_papers.json: {e}"
+                    ) from e
 
+        # Keep current-run IDs separate from durable seen IDs. Durable state is
+        # committed only after the email has been delivered successfully.
+        current_run_ids = set(self.pending_papers)
+        if self.pending_papers:
+            self.papers["pending"] = list(self.pending_papers.values())
+            print(f"Loaded {len(self.pending_papers)} pending papers for retry.")
         for category in categories:
-            fetched_papers = get_yesterday_arxiv_papers(category, max_entries)
+            fetched_papers = get_yesterday_arxiv_papers(
+                category,
+                max_entries,
+                timeout=self.arxiv_timeout_seconds,
+                max_attempts=self.arxiv_max_attempts,
+            )
             new_papers = []
             for paper in fetched_papers:
-                if paper["arXiv_id"] not in self.seen_ids:
+                arxiv_id = paper["arXiv_id"]
+                if arxiv_id not in self.seen_ids and arxiv_id not in current_run_ids:
                     new_papers.append(paper)
-                    self.seen_ids.add(paper["arXiv_id"])
-                    
+                    current_run_ids.add(arxiv_id)
+                    self.pending_papers[arxiv_id] = paper
+
             self.papers[category] = new_papers
+            if self.profile_root and new_papers:
+                # Checkpoint after each category so a later category/network
+                # failure cannot discard candidates already fetched.
+                self._write_json_atomically(
+                    self.pending_papers_path,
+                    list(self.pending_papers.values()),
+                )
             print(
                 "{} new papers on arXiv for {} are fetched (out of {} total).".format(
                     len(self.papers[category]), category, len(fetched_papers)
@@ -93,15 +140,22 @@ class ArxivDaily:
             sleep_time = random.randint(5, 15)
             time.sleep(sleep_time)
 
-        # Save updated seen arXiv IDs
+        # Persist the retry queue before any LLM work starts. A crash from this
+        # point onward can therefore be retried even after arXiv /new changes.
         if self.profile_root:
-            try:
-                with open(self.seen_ids_path, "w", encoding="utf-8") as f:
-                    json.dump(list(self.seen_ids), f, ensure_ascii=False, indent=2)
-            except OSError as e:
-                print(f"Failed to save seen_arxiv_ids.json: {e}")
+            self._write_json_atomically(
+                self.pending_papers_path,
+                list(self.pending_papers.values()),
+            )
 
-        self.model = GPT(model, base_url, api_key)
+        self.model = GPT(
+            model,
+            base_url,
+            api_key,
+            requests_per_minute=llm_requests_per_minute,
+            max_attempts=llm_max_attempts,
+            retry_base_seconds=llm_retry_base_seconds,
+        )
         print(f"Model initialized successfully. Using {model} at {base_url}.")
 
         self.description = description
@@ -124,8 +178,47 @@ class ArxivDaily:
         response = self.model.inference(prompt, temperature=self.temperature)
         return response
 
-    def process_paper(self, paper, max_retries=5):
-        retry_count = 0
+    @staticmethod
+    def _write_json_atomically(path: str, value) -> None:
+        target_dir = os.path.dirname(path)
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(path)}.",
+            suffix=".tmp",
+            dir=target_dir,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+                json.dump(value, temp_file, ensure_ascii=False, indent=2)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+            os.replace(temp_path, path)
+            temp_path = None
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    @staticmethod
+    def _parse_scoring_response(raw_response: str) -> dict:
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            if "\n" in cleaned:
+                first_line, remainder = cleaned.split("\n", 1)
+                if first_line.strip().lower() == "json":
+                    cleaned = remainder.strip()
+        response = json.loads(cleaned)
+        relevance_score = float(response["relevance"])
+        if not 0 <= relevance_score <= 10:
+            raise ValueError(f"relevance score out of range: {relevance_score}")
+        summary = response["summary"]
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("summary is empty")
+        return {"summary": summary, "relevance_score": relevance_score}
+
+    def process_paper(self, paper, max_parse_attempts=3):
         cache_path = (
             os.path.join(self.cache_dir, f"{paper['arXiv_id']}.json")
             if self.cache_dir
@@ -136,26 +229,33 @@ class ArxivDaily:
             try:
                 with open(cache_path, "r", encoding="utf-8") as cache_file:
                     cached_result = json.load(cache_file)
+                if cached_result.get("summary") == "该论文总结失败":
+                    raise ValueError("legacy failed-result cache")
+                relevance_score = float(cached_result["relevance_score"])
+                if not 0 <= relevance_score <= 10:
+                    raise ValueError("cached relevance score is out of range")
                 print(f"缓存文件 {cache_path} 读取成功。")
                 return cached_result
-            except (json.JSONDecodeError, OSError) as e:
+            except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as e:
                 print(f"缓存文件 {cache_path} 读取失败: {e}，将重新获取。")
 
-        while retry_count < max_retries:
+        for parse_attempt in range(1, max_parse_attempts + 1):
             try:
                 title = paper["title"]
                 abstract = paper["abstract"]
                 response = self.get_response(title, abstract)
-                response = response.strip("```").strip("json")
-                response = json.loads(response)
-                relevance_score = float(response["relevance"])
-                summary = response["summary"]
+            except Exception as e:
+                print(f"论文 {paper['arXiv_id']} 的 LLM 请求最终失败: {e}")
+                return None
+
+            try:
+                parsed = self._parse_scoring_response(response)
                 result = {
                     "title": title,
                     "arXiv_id": paper["arXiv_id"],
                     "abstract": abstract,
-                    "summary": summary,
-                    "relevance_score": relevance_score,
+                    "summary": parsed["summary"],
+                    "relevance_score": parsed["relevance_score"],
                     "pdf_url": paper["pdf_url"],
                 }
                 if cache_path:
@@ -167,29 +267,15 @@ class ArxivDaily:
                         print(f"写入缓存 {cache_path} 时失败: {write_error}")
                 return result
             except Exception as e:
-                retry_count += 1
-                print(f"处理论文 {paper['arXiv_id']} 时发生错误: {e}")
-                print(f"正在进行第 {retry_count} 次重试...")
-                if retry_count == max_retries:
-                    print(f"已达到最大重试次数 {max_retries}，放弃处理论文{paper['arXiv_id']}")
-                    # 处理失败，返回特殊结果
-                    result = {
-                        "title": paper["title"],
-                        "arXiv_id": paper["arXiv_id"],
-                        "abstract": paper["abstract"],
-                        "summary": "该论文总结失败",
-                        "relevance_score": 10,
-                        "pdf_url": paper.get("pdf_url", ""),
-                    }
-                    if cache_path:
-                        try:
-                            with self.lock:
-                                with open(cache_path, "w", encoding="utf-8") as cache_file:
-                                    json.dump(result, cache_file, ensure_ascii=False, indent=2)
-                        except OSError as write_error:
-                            print(f"写入缓存 {cache_path} 时失败: {write_error}")
-                    return result
-                time.sleep(1)  # 重试前等待1秒
+                print(
+                    f"论文 {paper['arXiv_id']} 的评分响应解析失败 "
+                    f"({parse_attempt}/{max_parse_attempts}): {e}"
+                )
+                if parse_attempt < max_parse_attempts:
+                    time.sleep(min(4, 2 ** (parse_attempt - 1)))
+
+        print(f"放弃处理格式持续无效的论文 {paper['arXiv_id']}，稍后运行会重试。")
+        return None
 
     def get_full_analysis(self, title: str, abstract: str, fulltext: str) -> str:
         prompt = self._tpl_full_analysis.format(
@@ -221,7 +307,12 @@ class ArxivDaily:
                 except (json.JSONDecodeError, OSError) as e:
                     print(f"全文分析缓存读取失败: {e}，将重新获取。")
 
-            fulltext = get_paper_fulltext(arxiv_id, max_chars=self.fulltext_max_chars)
+            fulltext = get_paper_fulltext(
+                arxiv_id,
+                max_chars=self.fulltext_max_chars,
+                timeout=self.arxiv_timeout_seconds,
+                max_attempts=self.arxiv_max_attempts,
+            )
             if fulltext:
                 try:
                     analysis = self.get_full_analysis(paper["title"], paper["abstract"], fulltext)
@@ -269,6 +360,7 @@ class ArxivDaily:
                 result = future.result()
                 if result:
                     recommendations_.append(result)
+                    self.successfully_processed_ids.add(result["arXiv_id"])
 
         recommendations_ = sorted(
             recommendations_, key=lambda x: x["relevance_score"], reverse=True
@@ -300,6 +392,50 @@ class ArxivDaily:
                     f.write("\n")
 
         return recommendations_
+
+    def commit_successfully_processed_ids(self) -> None:
+        """Atomically mark papers seen only after the email was delivered."""
+        if not self.profile_root or not self.successfully_processed_ids:
+            return
+
+        lock_path = os.path.join(self.profile_root, ".arxiv_state.lock")
+        with open(lock_path, "a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                latest_seen_ids = set()
+                if os.path.exists(self.seen_ids_path):
+                    with open(self.seen_ids_path, "r", encoding="utf-8") as seen_file:
+                        latest_seen_ids = set(json.load(seen_file))
+                updated_seen_ids = latest_seen_ids | self.successfully_processed_ids
+                self._write_json_atomically(
+                    self.seen_ids_path,
+                    sorted(updated_seen_ids),
+                )
+
+                latest_pending = dict(self.pending_papers)
+                if os.path.exists(self.pending_papers_path):
+                    with open(
+                        self.pending_papers_path, "r", encoding="utf-8"
+                    ) as pending_file:
+                        latest_pending.update(
+                            {
+                                paper["arXiv_id"]: paper
+                                for paper in json.load(pending_file)
+                            }
+                        )
+                remaining_pending = {
+                    arxiv_id: paper
+                    for arxiv_id, paper in latest_pending.items()
+                    if arxiv_id not in updated_seen_ids
+                }
+                self._write_json_atomically(
+                    self.pending_papers_path,
+                    list(remaining_pending.values()),
+                )
+                self.seen_ids = updated_seen_ids
+                self.pending_papers = remaining_pending
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def summarize(self, recommendations):
         overview = ""
@@ -391,38 +527,59 @@ class ArxivDaily:
 
     def render_email(self, recommendations):
         save_file_path = None
+        manifest_path = None
         if self.profile_root:
             save_file_path = os.path.join(self.profile_root, self.run_date, "arxiv_daily_email.html")
-        if save_file_path and os.path.exists(save_file_path):
-            with open(save_file_path, "r", encoding="utf-8") as f:
-                print(f"邮件已渲染，从缓存文件 {save_file_path} 读取邮件。")
-                return f.read()
+            manifest_path = os.path.join(
+                self.profile_root,
+                self.run_date,
+                "arxiv_daily_email_manifest.json",
+            )
+        recommendation_ids = [paper["arXiv_id"] for paper in recommendations]
+        if (
+            save_file_path
+            and manifest_path
+            and os.path.exists(save_file_path)
+            and os.path.exists(manifest_path)
+        ):
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                    cached_ids = json.load(manifest_file)
+                if cached_ids == recommendation_ids:
+                    with open(save_file_path, "r", encoding="utf-8") as email_file:
+                        print(f"邮件已渲染，从缓存文件 {save_file_path} 读取邮件。")
+                        return email_file.read()
+            except (json.JSONDecodeError, OSError, TypeError):
+                pass
+
         parts = []
         if len(recommendations) == 0:
-            return framework.replace("__CONTENT__", get_empty_html())
-        for i, p in enumerate(tqdm(recommendations, desc="Rendering Emails")):
-            rate = get_stars(p["relevance_score"])
-            parts.append(
-                get_block_html(
-                    str(i + 1) + ". " + p["title"],
-                    rate,
-                    p["arXiv_id"],
-                    p["summary"],
-                    p["pdf_url"],
-                    p.get("full_analysis", ""),
+            email_html = framework.replace("__CONTENT__", get_empty_html())
+        else:
+            for i, p in enumerate(tqdm(recommendations, desc="Rendering Emails")):
+                rate = get_stars(p["relevance_score"])
+                parts.append(
+                    get_block_html(
+                        str(i + 1) + ". " + p["title"],
+                        rate,
+                        p["arXiv_id"],
+                        p["summary"],
+                        p["pdf_url"],
+                        p.get("full_analysis", ""),
+                    )
                 )
-            )
-        summary = self.summarize(recommendations)
-        # Add the summary to the start of the email
-        content = summary
-        content += "<br>" + "</br><br>".join(parts) + "</br>"
-        email_html = framework.replace("__CONTENT__", content)
+            summary = self.summarize(recommendations)
+            # Add the summary to the start of the email
+            content = summary
+            content += "<br>" + "</br><br>".join(parts) + "</br>"
+            email_html = framework.replace("__CONTENT__", content)
+
         # 保存渲染后的邮件到 save_dir
-        if self.profile_root:
-            save_path = os.path.join(self.profile_root, self.run_date, "arxiv_daily_email.html")
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, "w", encoding="utf-8") as f:
+        if save_file_path and manifest_path:
+            os.makedirs(os.path.dirname(save_file_path), exist_ok=True)
+            with open(save_file_path, "w", encoding="utf-8") as f:
                 f.write(email_html)
+            self._write_json_atomically(manifest_path, recommendation_ids)
         return email_html
 
     def send_email(
@@ -450,11 +607,11 @@ class ArxivDaily:
         today = self.run_datetime.strftime("%Y/%m/%d")
         msg["Subject"] = Header(f"{title} {today}", "utf-8").encode()
 
-        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
+            server.login(sender, password)
+            server.sendmail(sender, receivers, msg.as_string())
 
-        server.login(sender, password)
-        server.sendmail(sender, receivers, msg.as_string())
-        server.quit()
+        self.commit_successfully_processed_ids()
 
 
 if __name__ == "__main__":

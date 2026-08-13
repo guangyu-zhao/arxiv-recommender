@@ -53,7 +53,14 @@ if __name__ == "__main__":
 
     # Test LLM availability
     try:
-        model = GPT(args.model, args.base_url, args.api_key)
+        model = GPT(
+            args.model,
+            args.base_url,
+            args.api_key,
+            requests_per_minute=cfg.get("llm_requests_per_minute", 30),
+            max_attempts=cfg.get("llm_max_attempts", 6),
+            retry_base_seconds=cfg.get("llm_retry_base_seconds", 2),
+        )
         model.inference("Hello, who are you?")
     except Exception as e:
         print(e)
@@ -78,6 +85,11 @@ if __name__ == "__main__":
         args.profile,
         relevance_score_threshold=cfg["relevance_score_threshold"],
         fulltext_max_chars=cfg["fulltext_max_chars"],
+        llm_requests_per_minute=cfg.get("llm_requests_per_minute", 30),
+        llm_max_attempts=cfg.get("llm_max_attempts", 6),
+        llm_retry_base_seconds=cfg.get("llm_retry_base_seconds", 2),
+        arxiv_timeout_seconds=cfg.get("arxiv_timeout_seconds", 30),
+        arxiv_max_attempts=cfg.get("arxiv_max_attempts", 5),
     )
 
     arxiv_daily.send_email(

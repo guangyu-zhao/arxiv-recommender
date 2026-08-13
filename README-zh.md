@@ -108,6 +108,11 @@ crontab -e
 | `max_paper_num`             | 最终推荐的论文数量上限          |
 | `relevance_score_threshold` | 进入全文精读的最低相关度分数（0–10） |
 | `fulltext_max_chars`        | 爬取全文时的最大字符数          |
+| `llm_requests_per_minute`   | 所有工作线程共享的 LLM 每分钟请求启动上限 |
+| `llm_max_attempts`          | LLM 暂时性错误的最大尝试次数       |
+| `llm_retry_base_seconds`    | LLM 指数退避的基准秒数           |
+| `arxiv_timeout_seconds`     | arXiv 请求读取超时秒数           |
+| `arxiv_max_attempts`        | arXiv 请求最大尝试次数           |
 
 
 ### 7.（可选）自定义 LLM Prompt
@@ -142,9 +147,9 @@ crontab -e
 ## 工作原理
 
 1. `util/request.py` 爬取指定分类的 arXiv "new" 页面，提取论文元数据（标题、摘要、PDF 链接等）。
-2. `arxiv_daily.py` 通过 OpenAI 兼容 API 并行调用 LLM，对每篇论文进行总结并评估与研究兴趣的相关性（0–10 分）。结果按 profile 和日期缓存到本地。
+2. `arxiv_daily.py` 先将候选论文写入 profile 的待处理队列，再通过 OpenAI 兼容 API 并行调用 LLM，对每篇论文进行总结并评估与研究兴趣的相关性（0–10 分）。所有线程共享请求限速器，暂时性错误使用指数退避重试；结果按 profile 和日期缓存到本地。
 3. 按相关性排序后，筛选出分数不低于 `relevance_score_threshold`（默认 6）的论文，最多取 `max_paper_num` 篇。针对每篇论文，`util/request.py` 爬取 arXiv HTML 全文（最多 `fulltext_max_chars` 字符），LLM 从四个维度生成深度解读（核心问题、方法创新、实验结果、局限与展望），同样缓存到本地。
-4. `util/construct_email.py` 渲染 HTML 邮件：顶部为今日研究趋势总结与重点推荐，之后是各论文卡片。邮件保存到本地并通过 SMTP 发送。
+4. `util/construct_email.py` 渲染 HTML 邮件：顶部为今日研究趋势总结与重点推荐，之后是各论文卡片。邮件保存到本地并通过 SMTP 发送。只有成功处理且邮件发送成功的论文才会从待处理队列原子移动到 `seen_arxiv_ids.json`；失败项会在下次运行重试。
 
 开启 `--save` 时，输出会按 profile 隔离：
 
@@ -152,12 +157,14 @@ crontab -e
 arxiv_history/
   memory/
     seen_arxiv_ids.json
+    pending_arxiv_papers.json
     2026-06-19/
       arxiv_daily_email.html
       2026-06-19.md
       json/
   wam/
     seen_arxiv_ids.json
+    pending_arxiv_papers.json
     2026-06-19/
       arxiv_daily_email.html
       2026-06-19.md
@@ -172,4 +179,3 @@ arxiv_history/
 ## 致谢
 
 - [zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily)
-

@@ -105,6 +105,11 @@ Edit `config.yaml` to control the core recommendation behavior:
 | `max_paper_num` | Max papers in the final recommendation |
 | `relevance_score_threshold` | Min relevance score (0–10) to enter full-text analysis |
 | `fulltext_max_chars` | Max characters read when fetching full text |
+| `llm_requests_per_minute` | Shared LLM request-start limit across all workers |
+| `llm_max_attempts` | Max attempts for transient LLM errors |
+| `llm_retry_base_seconds` | Base seconds for LLM exponential backoff |
+| `arxiv_timeout_seconds` | arXiv request read timeout in seconds |
+| `arxiv_max_attempts` | Max attempts for arXiv requests |
 
 ### 7. (Optional) Customize LLM Prompt
 
@@ -136,9 +141,9 @@ Edit the prompt templates in the `prompt/` directory to adjust how the LLM evalu
 ## How It Works
 
 1. `util/request.py` crawls the arXiv "new" page for each category and extracts paper metadata (title, abstract, PDF URL, etc.).
-2. `arxiv_daily.py` calls an LLM (via OpenAI-compatible API) in parallel to summarize every paper and score its relevance (0–10) against your research description. Results are cached locally by profile and date.
+2. `arxiv_daily.py` first checkpoints candidates to a per-profile pending queue, then calls an LLM (via OpenAI-compatible API) in parallel to summarize every paper and score its relevance (0–10) against your research description. All workers share a request rate limiter, and transient errors use exponential backoff. Results are cached locally by profile and date.
 3. Papers are sorted by relevance. Those scoring above `relevance_score_threshold` (default 6) are selected, up to `max_paper_num`. For each selected paper, `util/request.py` fetches the HTML full text from arXiv (up to `fulltext_max_chars` characters), and the LLM generates a 4-dimension deep analysis (core problem, method innovation, experimental results, limitations & future work). These are also cached.
-4. `util/construct_email.py` renders an HTML email: a trend summary + key paper highlights at the top, followed by individual paper cards. The email is saved locally and sent via SMTP.
+4. `util/construct_email.py` renders an HTML email: a trend summary + key paper highlights at the top, followed by individual paper cards. The email is saved locally and sent via SMTP. Only successfully processed papers are atomically moved from pending to `seen_arxiv_ids.json` after email delivery; failed papers remain pending for the next run.
 
 When `--save` is enabled, outputs are isolated by profile:
 
@@ -146,12 +151,14 @@ When `--save` is enabled, outputs are isolated by profile:
 arxiv_history/
   memory/
     seen_arxiv_ids.json
+    pending_arxiv_papers.json
     2026-06-19/
       arxiv_daily_email.html
       2026-06-19.md
       json/
   wam/
     seen_arxiv_ids.json
+    pending_arxiv_papers.json
     2026-06-19/
       arxiv_daily_email.html
       2026-06-19.md

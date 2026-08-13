@@ -13,3 +13,17 @@ relevance_score_threshold: 7
 # 全文精读时的最大字符数截断
 # Max characters to read when fetching full text
 fulltext_max_chars: 20000
+
+# 所有 LLM 工作线程共享的请求启动频率上限；设为 0 可关闭主动限速
+# Shared LLM request-start rate limit across workers; set to 0 to disable
+llm_requests_per_minute: 30
+
+# LLM 暂时性错误的最大尝试次数和指数退避基数（秒）
+# Maximum LLM attempts for transient errors and exponential backoff base (seconds)
+llm_max_attempts: 6
+llm_retry_base_seconds: 2
+
+# arXiv 请求的读取超时（秒）和最大尝试次数
+# arXiv request read timeout (seconds) and maximum attempts
+arxiv_timeout_seconds: 30
+arxiv_max_attempts: 5
